@@ -180,7 +180,7 @@ app-warkop/
 - **`backend/src/config/db.js`:** Menginisialisasi `mysql2/promise` connection pool dengan limit 10 koneksi, zona waktu `+07:00`, dan fungsi pengujian koneksi `testConnection()` yang mendeteksi kegagalan basis data secara komprehensif.
 - **`backend/src/controllers/authController.js`:** Memverifikasi kombinasi email dan password menggunakan `bcrypt.compare`. Jika valid dan akun berstatus aktif, menghasilkan signed token JWT yang membawa payload `{ id, name, email, role }`.
 - **`backend/src/controllers/orderController.js`:** Inti transaksi pesanan. Fungsi `createOrder` menggunakan **MySQL Transaction** (`beginTransaction`, `commit`, `rollback`) untuk menyimpan header order dan detail `order_items` secara atomik, mengunci status meja ke `occupied`, dan memancarkan event Socket `new_order`. Juga mengelola listing order, riwayat transaksi ber-pagination, analitik omset harian, dan perubahan status pesanan.
-- **`backend/src/controllers/tableController.js`:** Mengambil daftar meja dan status ketersediaannya. Memiliki fungsi `unlockTable` yang mengubah status meja menjadi `available` dan memancarkan event `table_unlocked` ke seluruh klien terhubung.
+- **`backend/src/controllers/tableController.js`:** Mengambil daftar meja dan status ketersediaannya. `completeTableSession` mengubah status meja menjadi `available` dan memancarkan `table_session_ended`; hanya event ini yang mereset sesi pelanggan.
 - **`backend/src/controllers/menuController.js`:** Menyediakan fungsi listing menu dengan filter kategori untuk pelanggan, serta fungsi `createMenu`, `updateMenu`, dan `deleteMenu` untuk panel manajer.
 - **`backend/src/controllers/userController.js`:** Menyediakan fungsi CRUD akun karyawan, hashing password otomatis sebelum disimpan, dan toggle status aktif karyawan.
 - **`backend/src/middlewares/authMiddleware.js`:** Membaca header `Authorization: Bearer <token>`, memverifikasinya terhadap `JWT_SECRET`, serta fungsi `requireRole` yang menolak request dengan status 403 Forbidden jika role pengguna tidak memiliki hak akses yang dipersyaratkan.
@@ -192,7 +192,7 @@ app-warkop/
 - **`frontend/src/pages/Customer.jsx`:** Antarmuka pemesanan pelanggan. Mengatur alur pemilihan meja wajib, modal terkunci, penjelajahan katalog menu dengan filter kategori, keranjang belanja interaktif, pengiriman order via API, serta mendengarkan event Socket `table_unlocked`.
 - **`frontend/src/pages/Cashier.jsx`:** Layar TV Monitor kasir. Terhubung ke Socket.io, mendengarkan `new_order`, memicu animasi visual flash berkedip dan suara alarm audio synthesizer ganda, menampilkan status meja dengan tombol "Buka Kunci", serta tombol pembaruan status pesanan (Proses/Selesai).
 - **`frontend/src/pages/Manager.jsx`:** Dashboard backoffice manajer bergaya SaaS gelap modern. Menampilkan 4 kartu ringkasan metrik (Omset hari ini, Pesanan hari ini, Pesanan aktif, Total staf), tab riwayat transaksi lengkap, tab kelola menu lengkap (tambah/hapus menu), dan tab kelola akun staf.
-- **`frontend/src/pages/Login.jsx`:** Form otentikasi staf dengan fitur "Quick Demo Login" (tombol isi otomatis akun kasir/manajer), visibilitas password toggle, dan pengalihan rute otomatis pasca login sesuai role pengguna.
+- **`frontend/src/pages/Login.jsx`:** Form otentikasi staf dengan visibilitas password toggle dan pengalihan rute otomatis pasca login sesuai role pengguna.
 - **`frontend/src/components/TableSelector.jsx`:** Grid interaktif representasi 20 meja warkop. Menampilkan badge merah "PENUH" untuk meja yang berstatus `occupied` dan menonaktifkan klik pada meja tersebut.
 - **`frontend/src/components/MenuCard.jsx`:** Komponen kartu katalog menu dengan visual representatif (foto atau emoji fallback), rincian harga rupiah, dan tombol kontrol penambahan/pengurangan kuantitas keranjang.
 - **`frontend/src/components/CartSidebar.jsx`:** Panel keranjang belanja dengan transisi responsif (drawer samping di desktop, bottom sheet di mobile), kalkulasi subtotal otomatis, tombol pengosongan keranjang, dan tombol Checkout.
@@ -374,10 +374,11 @@ Dashboard kasir dirancang khusus untuk ditampilkan pada monitor komputer kasir m
        ```
 3. **Pembaruan Status Transaksi:**
    - Kasir dapat menekan tombol **"Proses"** untuk mengubah status pesanan dari `pending` ke `processing`.
-   - Setelah pesanan disajikan dan pembayaran diselesaikan, kasir menekan tombol **"Selesai"** (`completed`).
-   - Perubahan status ini disinkronkan secara real-time ke semua dashboard melalui event `order_updated`.
+   - Setelah pesanan disajikan, kasir menekan tombol **"Selesai"** (`completed`). Status order berubah, tetapi meja tetap `occupied` dan sesi pelanggan tetap aktif agar dapat memesan lagi.
+   - Perubahan status disinkronkan melalui event `order_updated`; event `order_completed` memberi tahu pelanggan bahwa pesanan telah diantar tanpa menghapus sesi meja.
 4. **Manajemen Meja Kasir:**
-   - Di bagian atas antrean, kasir dapat memantau status seluruh meja (1–20) dan dapat mereset meja pelanggan yang telah selesai nongkrong dengan tombol **"Buka Kunci"**.
+   - Di bagian atas antrean, kasir dapat memantau status seluruh meja (1–20) dan mengakhiri sesi pelanggan dengan tombol **"Selesai & Bersihkan Meja"**. Tindakan ini mengubah status meja menjadi `available` dan mengirim event `table_session_ended` agar perangkat pelanggan menghapus sesi dan keranjang.
+   - Saat pelanggan membuka ulang halaman, aplikasi memeriksa status meja tersimpan melalui `GET /api/tables/:id/status`. Sesi hanya dipulihkan jika meja masih `occupied`.
 
 ---
 
@@ -398,7 +399,11 @@ Dashboard manajer (`/manager`) dikhususkan untuk pemilik atau pengelola warkop:
    - Manajer dapat menghapus menu yang sudah tidak dijual langsung dari dashboard.
 4. **Manajemen Karyawan (Staff RBAC Management):**
    - Menampilkan kartu profil seluruh karyawan warkop beserta rolenya.
-   - Form modal untuk menambahkan staf baru (Kasir atau Manajer) dengan password yang otomatis di-hash menggunakan algoritma Bcrypt sebelum masuk ke database.
+   - Form modal untuk menambahkan staf baru (Kasir atau Manajer) dengan password yang otomatis di-hash menggunakan algoritma Bcrypt sebelum masuk ke database, serta aksi **Pecat** dengan konfirmasi sebelum akun dihapus. Manajer tidak dapat menghapus akunnya sendiri.
+5. **Statistik & Laporan:**
+   - Filter statistik menggunakan tanggal spesifik (`YYYY-MM-DD`) atau rentang tanggal untuk menganalisis pesanan berstatus `completed`.
+   - Menampilkan total pendapatan, jumlah transaksi selesai, lima menu terlaris per kategori, dan transaksi per jam (06:00–23:00) dalam tampilan grafik atau tabel. Grafik tren pendapatan harian hanya ditampilkan untuk filter rentang tanggal; rincian jam sibuk mencakup menu dan jumlah item terjual.
+   - Tampilan **List Catatan** dapat disalin sebagai teks berformat tab melalui tombol **Salin Data**.
 
 ---
 
@@ -412,21 +417,29 @@ Semua endpoint berbasis REST menggunakan format pertukaran data JSON. Base URL l
 |---|---|---|---|---|---|
 | `GET` | `/health` | Publik | Health check status server backend | - | `{"status": "OK", "message": "Warkop API is running 🍵"}` |
 | `POST` | `/auth/login` | Publik | Otentikasi login staf & manajer | `{"email": "...", "password": "..."}` | `{"success": true, "token": "JWT_STRING", "user": {...}}` |
+| `PUT` | `/auth/change-password` | Kasir, Manajer | Mengubah password akun sendiri | Header Bearer, Body: `{"oldPassword": "...", "newPassword": "..."}` | `{"success": true, "message": "Password berhasil diubah."}` |
 | `GET` | `/auth/me` | Kasir, Manajer | Mengambil profil user yang sedang login | Header `Authorization: Bearer <token>` | `{"success": true, "user": {"id": 1, "role": "manager", ...}}` |
 | `GET` | `/menus` | Publik | Mengambil katalog menu warkop yang tersedia | Query: `?category=drink\|food\|snack`, `?all=1` | `{"success": true, "data": [{ "id": 1, "name": "Kopi Tubruk", "price": 6000, ... }], "total": 16}` |
 | `POST` | `/menus` | Khusus Manajer | Menambahkan menu baru ke katalog | Header Bearer, Body: `{"name": "...", "price": 10000, "category": "drink", ...}` | `{"success": true, "message": "Menu berhasil ditambahkan.", "data": {...}}` |
 | `PUT` | `/menus/:id` | Khusus Manajer | Memperbarui data menu yang ada | Header Bearer, URL Param `id`, Body: update fields | `{"success": true, "message": "Menu berhasil diperbarui."}` |
 | `DELETE` | `/menus/:id` | Khusus Manajer | Menghapus menu dari database | Header Bearer, URL Param `id` | `{"success": true, "message": "Menu berhasil dihapus."}` |
 | `GET` | `/tables` | Publik | Mengambil daftar 20 meja beserta statusnya | Query (opsional): `?status=available\|occupied` | `{"success": true, "data": [{"id": 1, "table_number": 1, "status": "available"}], "total": 20}` |
+| `GET` | `/tables/:id/status` | Publik | Memvalidasi status meja yang tersimpan di perangkat pelanggan | URL Param `id` meja | `{"success": true, "data": {"id": 5, "table_number": 5, "status": "occupied"}}` |
 | `POST` | `/tables/:id/unlock` | Kasir, Manajer | Membuka kunci meja dan memancarkan socket | Header Bearer, URL Param `id` meja | `{"success": true, "message": "Meja 5 berhasil dibuka kuncinya."}` |
+| `POST` | `/tables/:id/complete` | Kasir, Manajer | Mengakhiri sesi pelanggan dan mengosongkan meja | Header Bearer, URL Param `id` meja | `{"success": true, "message": "Sesi Meja 5 telah diakhiri..."}` |
 | `POST` | `/orders` | Publik | Pelanggan membuat pesanan baru (Transaksional) | Body: `{"table_id": 5, "notes": "...", "items": [{"menu_id": 1, "quantity": 2}]}` | `{"success": true, "message": "Pesanan berhasil dibuat.", "data": {"order_id": 12, ...}}` |
 | `GET` | `/orders` | Kasir, Manajer | Mengambil antrean pesanan aktif kasir | Header Bearer, Query: `?status=pending\|completed` | `{"success": true, "data": [{"id": 12, "table_number": 5, "items": [...], ...}]}` |
 | `PATCH` | `/orders/:id/status`| Kasir, Manajer | Mengubah status pesanan (`processing`/`completed`)| Header Bearer, Body: `{"status": "completed"}` | `{"success": true, "message": "Status pesanan #12 diubah ke 'completed'."}` |
 | `GET` | `/orders/history` | Khusus Manajer | Riwayat seluruh order dengan pagination | Header Bearer, Query: `?status=all`, `?limit=50` | `{"success": true, "data": [...], "pagination": {"total": 45, "limit": 50}}` |
+| `GET` | `/statistics/summary` | Khusus Manajer | Total pendapatan dan transaksi selesai | Query opsional: `?date=2026-10-30` atau `?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD` | `{"success": true, "data": {"total_revenue": 250000, "total_transactions": 18}}` |
+| `GET` | `/statistics/popular-items` | Khusus Manajer | Lima menu terlaris per kategori | Query opsional: `?date=2026-10-30` atau `?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD` | `{"success": true, "data": {"food": [...], "drink": [...], "snack": [...]}}` |
+| `GET` | `/statistics/peak-hours` | Khusus Manajer | Jumlah transaksi, total item, total per kategori, dan rincian menu per jam (0–23) | Query opsional: `?date=2026-10-30` atau `?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD` | `{"success": true, "data": [{"jam": "10:00", "jumlahTransaksi": 2, "totalItem": 5, "makanan": 2, "minuman": 2, "cemilan": 1, "detailItems": [{"nama": "Es Teh", "qty": 2}], "hour": 10, "transaction_count": 2}]}` |
+| `GET` | `/statistics/revenue-trend` | Khusus Manajer | Tren pendapatan dan transaksi selesai per hari | Query opsional: filter periode spesifik atau rentang tanggal seperti endpoint statistik lainnya; default 30 hari terakhir | `{"success": true, "data": [{"date": "2026-10-30", "total_revenue": 250000, "total_transactions": 18}]}` |
 | `GET` | `/dashboard/stats` | Khusus Manajer | Ringkasan metrik finansial & omset harian | Header Bearer | `{"success": true, "data": {"revenue_today": 250000, "orders_today": 18, ...}}` |
 | `GET` | `/users` | Khusus Manajer | Mengambil daftar staf warkop terdaftar | Header Bearer | `{"success": true, "data": [{"id": 1, "name": "Budi", "role": "cashier", ...}]}` |
 | `POST` | `/users` | Khusus Manajer | Membuat akun kasir/manajer baru | Header Bearer, Body: `{"name": "...", "email": "...", "password": "...", "role": "cashier"}` | `{"success": true, "message": "Karyawan baru berhasil ditambahkan.", "data": {...}}` |
 | `PATCH` | `/users/:id/status` | Khusus Manajer | Mengaktifkan/menonaktifkan akun staf | Header Bearer, Body: `{"is_active": 1\|0}` | `{"success": true, "message": "Status karyawan berhasil diperbarui."}` |
+| `DELETE` | `/users/:id` | Khusus Manajer | Menghapus akun karyawan tanpa menghapus riwayat transaksinya | Header Bearer, URL Param `id` karyawan | `{"success": true, "message": "Akun karyawan berhasil dihapus."}` |
 
 ---
 
@@ -448,14 +461,14 @@ Komunikasi WebSocket beroperasi pada server yang sama di port 5000 menggunakan p
         │                                    │     (Payload rincian order)     │  alarm beep bersuara)
         │                                    │                                 │
         │                                    │◀── PATCH /api/orders/:id ───────│ (Kasir klik "Selesai")
-        │◀─── order_updated ─────────────────│──── order_updated ─────────────▶│
-        │     (Status 'completed')           │                                 │
+        │◀─── order_completed ───────────────│──── order_updated ─────────────▶│
+        │     (Meja tetap terkunci)          │                                 │
         │                                    │                                 │
-        │                                    │◀── POST /api/tables/:id/unlock ─│ (Kasir buka kunci)
-        │◀─── table_unlocked ────────────────│                                 │
+        │                                    │◀── POST /api/tables/:id/complete│ (Selesai & bersihkan)
+        │◀── table_session_ended ────────────│                                 │
         │     (tableId: 5)                   │                                 │
-        │ (Storage meja dibersihkan,         │                                 │
-        │  modal pilih meja terbuka)         │                                 │
+        │ (Storage & keranjang dibersihkan,  │                                 │
+        │  pemilihan meja dibuka kembali)    │                                 │
 ```
 
 #### 1. Event `join_cashier`
@@ -471,6 +484,7 @@ Komunikasi WebSocket beroperasi pada server yang sama di port 5000 menggunakan p
   ```json
   {
     "order_id": 14,
+    "table_id": 5,
     "table_number": 5,
     "source": "customer",
     "status": "pending",
@@ -511,7 +525,13 @@ Komunikasi WebSocket beroperasi pada server yang sama di port 5000 menggunakan p
   ```
 - **Tindakan Klien:** Mengupdate badge status pesanan secara reaktif tanpa me-refresh halaman.
 
-#### 4. Event `table_unlocked`
+#### 4. Event `order_completed`
+- **Pengirim:** Server Backend setelah kasir menandai satu pesanan sebagai `completed`.
+- **Penerima:** Seluruh klien terhubung.
+- **Payload:** `{"order_id": 14, "table_id": 5}`.
+- **Tindakan Klien:** Pelanggan pada meja tersebut menerima notifikasi pesanan telah diantar. Event ini tidak mengubah status meja dan tidak menghapus sesi maupun keranjang.
+
+#### 5. Event `table_unlocked`
 - **Pengirim:** Server Backend (dipicu oleh endpoint `unlockTable`).
 - **Penerima:** Seluruh klien pelanggan (`Customer.jsx`).
 - **Payload Data Structure:**
@@ -520,7 +540,13 @@ Komunikasi WebSocket beroperasi pada server yang sama di port 5000 menggunakan p
     "tableId": 5
   }
   ```
-- **Tindakan Klien:** Setiap perangkat pelanggan membandingkan `tableId` dari payload dengan nomor meja yang tersimpan di `localStorage`. Jika sama, klien menghapus token meja dari storage, membersihkan keranjang, menampilkan modal notifikasi meja telah dibuka kuncinya, dan menampilkan kembali form pemilihan nomor meja awal.
+- **Tindakan Klien:** Memperbarui status meja pada dashboard kasir. Event ini tidak mereset sesi pelanggan; reset sesi pelanggan dilakukan melalui `table_session_ended`.
+
+#### 6. Event `table_session_ended`
+- **Pengirim:** Server Backend setelah kasir/manajer memanggil `POST /api/tables/:id/complete`.
+- **Penerima:** Seluruh klien terhubung.
+- **Payload:** `{"tableId": 5}`.
+- **Tindakan Klien:** Perangkat pelanggan yang menyimpan ID meja tersebut menghapus sesi meja dan keranjang, menampilkan notifikasi sesi berakhir, lalu membuka kembali pemilihan meja. Pemeriksaan `GET /api/tables/:id/status` saat halaman dimuat juga membersihkan sesi usang jika meja telah tersedia.
 
 ---
 
@@ -685,4 +711,3 @@ Misalkan IP server Anda adalah `192.168.100.12`:
 ---
 
 *Dokumentasi teknis ini disusun secara presisi berdasarkan basis kode aktif repositori Warkop POS.*
-

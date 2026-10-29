@@ -6,7 +6,12 @@ const {
   updateMenu,
   deleteMenu,
 } = require('../controllers/menuController');
-const { getAllTables, unlockTable } = require('../controllers/tableController');
+const {
+  getAllTables,
+  getTableStatus,
+  unlockTable,
+  completeTableSession,
+} = require('../controllers/tableController');
 const {
   createOrder,
   getOrders,
@@ -14,8 +19,19 @@ const {
   getOrderHistory,
   getDashboardStats,
 } = require('../controllers/orderController');
-const { login, getMe } = require('../controllers/authController');
-const { getUsers, createUser, toggleUserStatus } = require('../controllers/userController');
+const { login, getMe, changePassword } = require('../controllers/authController');
+const {
+  getSummary,
+  getPopularItems,
+  getPeakHours,
+  getRevenueTrend,
+} = require('../controllers/statisticsController');
+const {
+  getUsers,
+  createUser,
+  toggleUserStatus,
+  deleteUser,
+} = require('../controllers/userController');
 const { verifyToken, requireRole } = require('../middlewares/authMiddleware');
 
 const router = Router();
@@ -27,6 +43,9 @@ router.post('/auth/login', login);
 // GET  /api/auth/me             → Cek sesi / profil user saat ini (Protected)
 router.get('/auth/me', verifyToken, getMe);
 
+// PUT /api/auth/change-password → Ubah password akun yang sedang login
+router.put('/auth/change-password', verifyToken, changePassword);
+
 // ── 2. Publik (Menu & Meja & Buat Order) ─────────────────────────────────
 // GET  /api/menus               → Semua menu (bisa filter ?category=...)
 router.get('/menus', getAllMenus);
@@ -34,8 +53,14 @@ router.get('/menus', getAllMenus);
 // GET  /api/tables              → Semua meja (bisa filter ?status=...)
 router.get('/tables', getAllTables);
 
+// GET /api/tables/:id/status → Status satu meja untuk validasi sesi pelanggan
+router.get('/tables/:id/status', getTableStatus);
+
 // POST /api/tables/:id/unlock → Kasir/Manajer buka kunci meja (broadcast socket)
 router.post('/tables/:id/unlock', verifyToken, requireRole('cashier', 'manager'), unlockTable);
+
+// POST /api/tables/:id/complete → Kasir/Manajer akhiri sesi dan bersihkan meja
+router.post('/tables/:id/complete', verifyToken, requireRole('cashier', 'manager'), completeTableSession);
 
 // POST /api/orders              → Pelanggan kirim pesanan baru
 router.post('/orders', createOrder);
@@ -54,6 +79,12 @@ router.get('/orders/history', verifyToken, requireRole('manager'), getOrderHisto
 // GET  /api/dashboard/stats     → Ringkasan omset & performa
 router.get('/dashboard/stats', verifyToken, requireRole('manager'), getDashboardStats);
 
+// ── Statistik & Laporan (Khusus Manager) ──────────────────────────────────
+router.get('/statistics/summary', verifyToken, requireRole('manager'), getSummary);
+router.get('/statistics/popular-items', verifyToken, requireRole('manager'), getPopularItems);
+router.get('/statistics/peak-hours', verifyToken, requireRole('manager'), getPeakHours);
+router.get('/statistics/revenue-trend', verifyToken, requireRole('manager'), getRevenueTrend);
+
 // ── 5. Employee Management (Khusus Manager) ──────────────────────────────
 // GET   /api/users              → Daftar karyawan
 router.get('/users', verifyToken, requireRole('manager'), getUsers);
@@ -63,6 +94,9 @@ router.post('/users', verifyToken, requireRole('manager'), createUser);
 
 // PATCH /api/users/:id/status   → Toggle status aktif karyawan
 router.patch('/users/:id/status', verifyToken, requireRole('manager'), toggleUserStatus);
+
+// DELETE /api/users/:id → Hapus akun karyawan (Khusus Manajer)
+router.delete('/users/:id', verifyToken, requireRole('manager'), deleteUser);
 
 // ── 6. Menu Management (Khusus Manager) ──────────────────────────────────
 // POST   /api/menus             → Tambah menu baru

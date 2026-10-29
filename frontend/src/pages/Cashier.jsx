@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
 import {
   Wifi, WifiOff, BellRing, Clock, CheckCircle2,
-  Loader2, Coffee, Table2, ShoppingBag, RefreshCw, LogOut,
+  Loader2, Coffee, Table2, ShoppingBag, RefreshCw, LogOut, KeyRound,
 } from 'lucide-react';
 import api from '../utils/api';
 import { SOCKET_BASE_URL } from '../utils/config';
+import Toast from '../components/Toast';
+import ChangePasswordModal from '../components/ChangePasswordModal';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const formatRupiah = (n) =>
@@ -196,6 +198,10 @@ const Cashier = () => {
   const [updatingId,  setUpdatingId]  = useState(null);
   const [filterStatus, setFilterStatus] = useState('active'); // 'active' | 'completed' | 'all'
   const [tables,       setTables]       = useState([]);
+  const [tableActionId, setTableActionId] = useState(null);
+  const [tableActionError, setTableActionError] = useState('');
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const socketRef = useRef(null);
 
@@ -217,7 +223,7 @@ const Cashier = () => {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  // ── Table management (unlock) ───────────────────────────────────────────────
+  // ── Table management ────────────────────────────────────────────────────────
   const fetchTables = useCallback(async () => {
     try {
       const { data } = await api.get('/tables');
@@ -227,14 +233,19 @@ const Cashier = () => {
     }
   }, []);
 
-  const handleUnlockTable = async (tableId) => {
+  const handleCompleteTable = async (tableId) => {
+    setTableActionId(tableId);
+    setTableActionError('');
     try {
-      await api.post(`/tables/${tableId}/unlock`);
+      await api.post(`/tables/${tableId}/complete`);
       setTables((prev) =>
         prev.map((t) => (t.id === tableId ? { ...t, status: 'available' } : t))
       );
     } catch (err) {
-      console.error('Gagal buka kunci meja:', err);
+      console.error('Gagal menyelesaikan sesi meja:', err);
+      setTableActionError(err?.response?.data?.message || 'Gagal menyelesaikan sesi meja.');
+    } finally {
+      setTableActionId(null);
     }
   };
 
@@ -267,6 +278,15 @@ const Cashier = () => {
         created_at:   payload.created_at,
         items:        payload.items || [],
       };
+      if (payload.table_id) {
+        setTables((prev) =>
+          prev.map((table) =>
+            Number(table.id) === Number(payload.table_id)
+              ? { ...table, status: 'occupied' }
+              : table
+          )
+        );
+      }
 
       // Add to top of list
       setOrders((prev) => {
@@ -300,7 +320,13 @@ const Cashier = () => {
     // Table unlocked by cashier/manager
     socket.on('table_unlocked', ({ tableId }) => {
       setTables((prev) =>
-        prev.map((t) => (t.id === tableId ? { ...t, status: 'available' } : t))
+        prev.map((t) => (Number(t.id) === Number(tableId) ? { ...t, status: 'available' } : t))
+      );
+    });
+
+    socket.on('table_session_ended', ({ tableId }) => {
+      setTables((prev) =>
+        prev.map((t) => (Number(t.id) === Number(tableId) ? { ...t, status: 'available' } : t))
       );
     });
 
@@ -335,6 +361,23 @@ const Cashier = () => {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
 
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      {isChangePasswordOpen && (
+        <ChangePasswordModal
+          onClose={() => setIsChangePasswordOpen(false)}
+          onSuccess={(message) => {
+            setIsChangePasswordOpen(false);
+            setToast({ message, type: 'success' });
+          }}
+        />
+      )}
+
       {/* ── Flash overlay ── */}
       {showFlash && <NewOrderFlash onDone={() => setShowFlash(false)} />}
 
@@ -366,6 +409,14 @@ const Cashier = () => {
 
           {/* Connection status + refresh + logout */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-amber-500/10 px-2.5 py-2 text-xs font-bold text-amber-300 transition-colors hover:bg-amber-500/20 sm:px-3"
+              title="Ganti Password"
+            >
+              <KeyRound size={14} />
+              <span className="hidden sm:inline">Ganti Password</span>
+            </button>
             <button
               onClick={fetchOrders}
               className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-700 hover:bg-gray-600 transition-colors text-gray-300"
@@ -421,7 +472,7 @@ const Cashier = () => {
       <div className="max-w-7xl mx-auto px-4 pb-4">
         <div className="bg-gray-800 rounded-2xl p-4 border border-gray-700">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-white text-sm">Manajemen Meja (Buka Kunci)</h3>
+            <h3 className="font-bold text-white text-sm">Manajemen Meja</h3>
             <button
               onClick={fetchTables}
               className="flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
@@ -429,6 +480,11 @@ const Cashier = () => {
               <RefreshCw size={12} /> Refresh
             </button>
           </div>
+          {tableActionError && (
+            <p role="alert" className="mb-3 text-xs font-medium text-red-400">
+              {tableActionError}
+            </p>
+          )}
           {tables.length === 0 ? (
             <p className="text-xs text-gray-500">Memuat meja...</p>
           ) : (
@@ -447,12 +503,12 @@ const Cashier = () => {
                     {table.status === 'occupied' ? 'Terisi' : 'Tersedia'}
                   </div>
                   <button
-                    onClick={() => handleUnlockTable(table.id)}
-                    disabled={table.status !== 'occupied'}
-                    className="mt-1.5 w-full text-[10px] px-1.5 py-1 rounded-lg bg-amber-500 text-white font-bold
+                    onClick={() => handleCompleteTable(table.id)}
+                    disabled={table.status !== 'occupied' || tableActionId === table.id}
+                    className="mt-1.5 w-full min-h-9 text-[9px] leading-3 px-1.5 py-1 rounded-lg bg-amber-500 text-white font-bold
                                disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600 transition-colors"
                   >
-                    Buka Kunci
+                    {tableActionId === table.id ? 'Memproses...' : 'Selesai & Bersihkan Meja'}
                   </button>
                 </div>
               ))}

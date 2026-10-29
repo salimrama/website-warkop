@@ -110,5 +110,38 @@ const toggleUserStatus = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, createUser, toggleUserStatus };
+/**
+ * DELETE /api/users/:id
+ * Menghapus akun karyawan. Riwayat transaksi tetap dipertahankan oleh FK orders.cashier_id.
+ */
+const deleteUser = async (req, res) => {
+  const userId = Number(req.params.id);
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    return res.status(400).json({ success: false, message: 'ID karyawan tidak valid.' });
+  }
 
+  if (userId === Number(req.user.id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Anda tidak dapat menghapus akun Anda sendiri.',
+    });
+  }
+
+  try {
+    const [result] = await pool.query('DELETE FROM users WHERE id = ?', [userId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Akun karyawan berhasil dihapus.',
+    });
+  } catch (err) {
+    console.error('[userController.deleteUser]', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus karyawan.' });
+  }
+};
+
+module.exports = { getUsers, createUser, toggleUserStatus, deleteUser };

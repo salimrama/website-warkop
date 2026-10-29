@@ -68,27 +68,6 @@ const Login = () => {
           </div>
         )}
 
-        {/* Quick Demo Login Pill */}
-        <div className="mb-6 bg-slate-900/60 border border-slate-700/60 rounded-2xl p-3 flex flex-col gap-2">
-          <span className="text-[11px] font-bold uppercase text-slate-400">Akun Percobaan (Klik untuk isi cepat):</span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => { setEmail('kasir@warkop.com'); setPassword('kasir123'); }}
-              className="flex-1 py-1.5 px-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-semibold transition-colors text-center"
-            >
-              🖥️ Kasir Demo
-            </button>
-            <button
-              type="button"
-              onClick={() => { setEmail('manager@warkop.com'); setPassword('admin123'); }}
-              className="flex-1 py-1.5 px-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-semibold transition-colors text-center"
-            >
-              📊 Manajer Demo
-            </button>
-          </div>
-        </div>
-
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
@@ -169,4 +148,3 @@ const Login = () => {
 };
 
 export default Login;
-

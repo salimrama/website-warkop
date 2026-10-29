@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ShoppingCart, Coffee, RefreshCw, MapPin, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -38,7 +38,24 @@ const Customer = () => {
   const [isCheckingOut,  setIsCheckingOut]  = useState(false);
   const [showSuccess,    setShowSuccess]    = useState(false);     // modal sukses checkout
   const [showUnlockNotice, setShowUnlockNotice] = useState(false); // modal notif buka kunci dari kasir
+  const [isRestoringTable, setIsRestoringTable] = useState(true);
   const [toast,          setToast]          = useState(null);     // {message, type}
+  const endedTableIdsRef = useRef(new Set());
+
+  const resetCustomerTableSession = () => {
+    localStorage.removeItem('selected_table');
+    localStorage.removeItem('is_table_locked');
+    setSelectedTable(null);
+    setCart([]);
+    setIsCartOpen(false);
+    setShowSuccess(false);
+    setShowUnlockNotice(true);
+    fetchTables();
+    setToast({
+      message: 'Sesi meja telah diakhiri. Terima kasih atas kunjungan Anda.',
+      type: 'success',
+    });
+  };
 
   // ── Fetch data ───────────────────────────────────────────────────────────────
   const fetchTables = useCallback(async () => {
@@ -70,30 +87,86 @@ const Customer = () => {
     fetchMenus();
   }, [fetchTables, fetchMenus]);
 
-  // Restore selected table from localStorage on mount (persist across reloads)
+  // Restore a saved table only while its server-side session remains active.
   useEffect(() => {
+    let isMounted = true;
+
     try {
       const saved = localStorage.getItem('selected_table');
-      if (saved) setSelectedTable(JSON.parse(saved));
+      if (!saved) {
+        setIsRestoringTable(false);
+        return () => { isMounted = false; };
+      }
+
+      const savedTable = JSON.parse(saved);
+      if (!savedTable?.id) {
+        localStorage.removeItem('selected_table');
+        localStorage.removeItem('is_table_locked');
+        setIsRestoringTable(false);
+        return () => { isMounted = false; };
+      }
+
+      api.get(`/tables/${savedTable.id}/status`)
+        .then(({ data }) => {
+          if (!isMounted) return;
+          const currentTable = data.data;
+          if (
+            currentTable?.status === 'occupied' &&
+            !endedTableIdsRef.current.has(String(currentTable.id))
+          ) {
+            setSelectedTable(currentTable);
+            return;
+          }
+          resetCustomerTableSession();
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          if (err?.response?.status === 404) {
+            resetCustomerTableSession();
+            return;
+          }
+          console.error('Gagal memvalidasi sesi meja:', err);
+          setToast({
+            message: 'Status meja tidak dapat diperiksa. Silakan pilih meja kembali.',
+            type: 'error',
+          });
+        })
+        .finally(() => {
+          if (isMounted) setIsRestoringTable(false);
+        });
     } catch {
       localStorage.removeItem('selected_table');
+      localStorage.removeItem('is_table_locked');
+      setIsRestoringTable(false);
     }
+
+    return () => { isMounted = false; };
   }, []);
 
-  // Real-time unlock listener from cashier/manager
+  // Reset a matching customer session as soon as the cashier ends it.
   useEffect(() => {
     const socket = io(SOCKET_BASE_URL, { transports: ['websocket', 'polling'] });
-    socket.on('table_unlocked', ({ tableId }) => {
-      setSelectedTable((prev) => {
-        if (prev && Number(prev.id) === Number(tableId)) {
-          localStorage.removeItem('selected_table');
-          localStorage.removeItem('is_table_locked');
-          clearCart();
-          setShowUnlockNotice(true);
-          return null;
+
+    const handleTableSessionEnded = ({ tableId }) => {
+      endedTableIdsRef.current.add(String(tableId));
+      try {
+        const savedTable = JSON.parse(localStorage.getItem('selected_table') || 'null');
+        if (Number(savedTable?.id) === Number(tableId)) resetCustomerTableSession();
+      } catch {
+        resetCustomerTableSession();
+      }
+    };
+
+    socket.on('table_session_ended', handleTableSessionEnded);
+    socket.on('order_completed', ({ table_id }) => {
+      try {
+        const savedTable = JSON.parse(localStorage.getItem('selected_table') || 'null');
+        if (Number(savedTable?.id) === Number(table_id)) {
+          showToast('Pesanan telah diantar. Silakan pesan lagi jika diperlukan.', 'success');
         }
-        return prev;
-      });
+      } catch (err) {
+        console.error('Gagal membaca sesi meja saat pesanan selesai:', err);
+      }
     });
     return () => socket.disconnect();
   }, []);
@@ -276,7 +349,7 @@ const Customer = () => {
               </button>
             </div>
 
-            {loadingTables ? (
+            {loadingTables || isRestoringTable ? (
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
                 {Array.from({ length: 20 }).map((_, i) => (
                   <div key={i} className="aspect-square rounded-2xl bg-gray-100 animate-pulse" />
@@ -391,7 +464,7 @@ const Customer = () => {
           <div className="bg-white rounded-3xl p-6 w-full max-w-2xl shadow-xl border border-amber-100 max-h-[90vh] overflow-y-auto">
             <h2 className="font-bold text-gray-800 text-lg mb-1">Pilih Nomor Meja</h2>
             <p className="text-sm text-gray-500 mb-4">Pilih meja tempat kamu duduk untuk mulai memesan.</p>
-            {loadingTables ? (
+            {loadingTables || isRestoringTable ? (
               <p className="text-sm text-gray-400">Memuat data meja...</p>
             ) : (
               <TableSelector tables={tables} selectedTable={null} onSelect={handleSelectTable} />
@@ -424,9 +497,9 @@ const Customer = () => {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl text-center">
             <div className="text-4xl mb-3">🔓</div>
-            <h2 className="font-bold text-gray-800 text-lg mb-2">Meja Dibuka Kunci</h2>
+            <h2 className="font-bold text-gray-800 text-lg mb-2">Sesi Meja Berakhir</h2>
             <p className="text-sm text-gray-500 mb-4">
-              Kasir telah membuka kunci meja. Silakan pilih meja kembali.
+              Sesi meja telah diakhiri. Silakan pilih meja kembali.
             </p>
             <button
               onClick={() => setShowUnlockNotice(false)}

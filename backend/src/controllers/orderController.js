@@ -129,6 +129,7 @@ const createOrder = async (req, res) => {
     //    Setiap item sudah memiliki nama menu dari menuMap (sudah di-query sebelumnya)
     const notificationPayload = {
       order_id:     orderId,
+      table_id,
       table_number: table.table_number,
       source:       'customer',
       status:       'pending',
@@ -262,20 +263,15 @@ const updateOrderStatus = async (req, res) => {
     // Update status order
     await pool.query('UPDATE orders SET status = ? WHERE id = ?', [status, id]);
 
-    // Jika order di-complete / cancel → cek apakah meja bisa dibebaskan
-    if (status === 'completed' || status === 'cancelled') {
-      const [[{ activeCount }]] = await pool.query(
-        `SELECT COUNT(*) AS activeCount FROM orders
-         WHERE table_id = ? AND status IN ('pending','processing') AND id != ?`,
-        [order.table_id, id]
-      );
-      if (activeCount === 0) {
-        await pool.query("UPDATE `tables` SET status = 'available' WHERE id = ?", [order.table_id]);
-      }
-    }
-
     // Broadcast perubahan status ke semua client (TV, dashboard)
     req.io.emit('order_updated', { order_id: parseInt(id), status });
+
+    if (status === 'completed') {
+      req.io.emit('order_completed', {
+        order_id: Number(id),
+        table_id: Number(order.table_id),
+      });
+    }
 
     return res.status(200).json({ success: true, message: `Status pesanan #${id} diubah ke '${status}'.` });
   } catch (err) {
@@ -383,5 +379,3 @@ const getDashboardStats = async (req, res) => {
 };
 
 module.exports = { createOrder, getOrders, updateOrderStatus, getOrderHistory, getDashboardStats };
-
-
