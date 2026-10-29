@@ -3,11 +3,12 @@ import {
   Users, History, TrendingUp, DollarSign, ShoppingBag,
   UserPlus, LogOut, Coffee, RefreshCw, CheckCircle2,
   XCircle, Clock, ShieldCheck, ChevronRight, X, UtensilsCrossed, Plus, Trash2, KeyRound,
-  BarChart3, CalendarDays, List, Copy
+  BarChart3, CalendarDays, List, Copy, Database
 } from 'lucide-react';
 import api from '../utils/api';
 import Toast from '../components/Toast';
 import ChangePasswordModal from '../components/ChangePasswordModal';
+import DatabaseViewer from '../components/DatabaseViewer';
 
 const formatRupiah = (n) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n);
@@ -21,7 +22,7 @@ const formatDate = (dateStr) => {
 };
 
 const Manager = () => {
-  const [activeTab,    setActiveTab]    = useState('history'); // 'history' | 'statistics' | 'employees' | 'menus'
+  const [activeTab,    setActiveTab]    = useState('history'); // 'history' | 'statistics' | 'employees' | 'menus' | 'database'
   const [stats,        setStats]        = useState(null);
   const [history,      setHistory]      = useState([]);
   const [employees,    setEmployees]    = useState([]);
@@ -465,7 +466,22 @@ const Manager = () => {
             <Users size={18} />
             Kelola Karyawan
           </button>
+          <button
+            onClick={() => setActiveTab('database')}
+            className={`flex items-center gap-2 pb-4 text-sm font-bold border-b-2 transition-all ${
+              activeTab === 'database'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Database size={18} />
+            Database
+          </button>
         </div>
+
+        {activeTab === 'database' && (
+          <DatabaseViewer onToast={setToast} />
+        )}
 
         {activeTab === 'statistics' && (
           <section className="space-y-6">

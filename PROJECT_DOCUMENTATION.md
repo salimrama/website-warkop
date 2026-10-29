@@ -440,6 +440,7 @@ Semua endpoint berbasis REST menggunakan format pertukaran data JSON. Base URL l
 | `POST` | `/users` | Khusus Manajer | Membuat akun kasir/manajer baru | Header Bearer, Body: `{"name": "...", "email": "...", "password": "...", "role": "cashier"}` | `{"success": true, "message": "Karyawan baru berhasil ditambahkan.", "data": {...}}` |
 | `PATCH` | `/users/:id/status` | Khusus Manajer | Mengaktifkan/menonaktifkan akun staf | Header Bearer, Body: `{"is_active": 1\|0}` | `{"success": true, "message": "Status karyawan berhasil diperbarui."}` |
 | `DELETE` | `/users/:id` | Khusus Manajer | Menghapus akun karyawan tanpa menghapus riwayat transaksinya | Header Bearer, URL Param `id` karyawan | `{"success": true, "message": "Akun karyawan berhasil dihapus."}` |
+| `GET` | `/database/:tableName` | Khusus Manajer | Melihat data read-only tabel `orders`, `order_items`, `menu`, atau `users` untuk ekspor; kolom password tidak disertakan | Header Bearer, URL Param `tableName` (whitelist) | `{"success": true, "columns": ["id", "..."], "data": [...]}` |
 
 ---
 

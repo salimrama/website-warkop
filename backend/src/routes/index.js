@@ -32,6 +32,7 @@ const {
   toggleUserStatus,
   deleteUser,
 } = require('../controllers/userController');
+const { getTableData } = require('../controllers/databaseController');
 const { verifyToken, requireRole } = require('../middlewares/authMiddleware');
 
 const router = Router();
@@ -84,6 +85,9 @@ router.get('/statistics/summary', verifyToken, requireRole('manager'), getSummar
 router.get('/statistics/popular-items', verifyToken, requireRole('manager'), getPopularItems);
 router.get('/statistics/peak-hours', verifyToken, requireRole('manager'), getPeakHours);
 router.get('/statistics/revenue-trend', verifyToken, requireRole('manager'), getRevenueTrend);
+
+// ── Database Viewer (Khusus Manager, read-only) ────────────────────────────
+router.get('/database/:tableName', verifyToken, requireRole('manager'), getTableData);
 
 // ── 5. Employee Management (Khusus Manager) ──────────────────────────────
 // GET   /api/users              → Daftar karyawan
