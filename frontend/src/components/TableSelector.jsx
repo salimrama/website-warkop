@@ -3,15 +3,21 @@ import { Users } from 'lucide-react';
 /**
  * Displays a grid of tables for the customer to select.
  * @param {Array}    tables          - List of table objects from API
- * @param {Object}   selectedTable   - Currently selected table (or null)
+ * @param {number|string|null} selectedTableId - ID of the currently selected table
+ * @param {number|string|null} selectedTableNumber - Number of the currently selected table
  * @param {Function} onSelect        - Called with table object when clicked
  */
-const TableSelector = ({ tables, selectedTable, onSelect }) => {
+const TableSelector = ({
+  tables,
+  selectedTableId = null,
+  selectedTableNumber = null,
+  onSelect,
+}) => {
   return (
     <div>
       <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-5 gap-3">
         {tables.map((table) => {
-          const isSelected  = selectedTable?.id === table.id;
+          const isSelected  = selectedTableId === table.id;
           const isOccupied  = table.status === 'occupied';
 
           return (
@@ -54,9 +60,9 @@ const TableSelector = ({ tables, selectedTable, onSelect }) => {
         })}
       </div>
 
-      {selectedTable && (
+      {selectedTableNumber !== null && selectedTableNumber !== undefined && (
         <p className="mt-4 text-center text-sm text-green-600 font-medium">
-          ✅ Kamu memilih <strong>Meja {selectedTable.table_number}</strong>. Sekarang pilih menu di bawah!
+          ✅ Kamu memilih <strong>Meja {selectedTableNumber}</strong>. Sekarang pilih menu di bawah!
         </p>
       )}
     </div>
@@ -64,4 +70,3 @@ const TableSelector = ({ tables, selectedTable, onSelect }) => {
 };
 
 export default TableSelector;
-

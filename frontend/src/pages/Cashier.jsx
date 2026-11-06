@@ -1,13 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { useState, useEffect } from 'react';
 import {
   Wifi, WifiOff, BellRing, Clock, CheckCircle2,
   Loader2, Coffee, Table2, ShoppingBag, RefreshCw, LogOut, KeyRound,
 } from 'lucide-react';
-import api from '../utils/api';
-import { SOCKET_BASE_URL } from '../utils/config';
 import Toast from '../components/Toast';
 import ChangePasswordModal from '../components/ChangePasswordModal';
+import useCashierData from '../hooks/useCashierData';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const formatRupiah = (n) =>
@@ -76,8 +74,20 @@ const NewOrderFlash = ({ onDone }) => {
 };
 
 /** Single order card */
-const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
-  const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+const OrderCard = ({
+  id,
+  status,
+  tableNumber,
+  createdAt,
+  source,
+  items,
+  notes,
+  totalPrice,
+  onUpdateStatus,
+  updatingId,
+  isNew,
+}) => {
+  const statusCfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
 
   return (
     <div className={`
@@ -92,16 +102,16 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
           <div className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-black
             ${isNew ? 'bg-amber-600 text-white' : 'bg-gray-600 text-amber-400'}`}>
             <Table2 size={18} className="mb-0.5" />
-            <span className="text-2xl leading-none">{order.table_number}</span>
+            <span className="text-2xl leading-none">{tableNumber}</span>
           </div>
           <div>
             <div className={`font-black text-xl ${isNew ? 'text-amber-900' : 'text-white'}`}>
-              Meja {order.table_number}
+              Meja {tableNumber}
             </div>
             <div className={`text-sm font-medium flex items-center gap-1.5
               ${isNew ? 'text-amber-800' : 'text-gray-400'}`}>
               <Clock size={13} />
-              {formatTime(order.created_at)} · {timeAgo(order.created_at)}
+              {formatTime(createdAt)} · {timeAgo(createdAt)}
             </div>
           </div>
         </div>
@@ -114,14 +124,14 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
           {/* Source badge */}
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium
             ${isNew ? 'bg-amber-700/40 text-amber-900' : 'bg-gray-600 text-gray-300'}`}>
-            {order.source === 'customer' ? '📱 Pelanggan' : '🖥️ Kasir'}
+            {source === 'customer' ? '📱 Pelanggan' : '🖥️ Kasir'}
           </span>
         </div>
       </div>
 
       {/* Items list */}
       <div className="px-6 py-4 space-y-2">
-        {(order.items || []).map((item, idx) => (
+        {(items || []).map((item, idx) => (
           <div key={idx} className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3 flex-1 min-w-0">
               <span className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 font-bold text-sm flex items-center justify-center shrink-0 mt-0.5">
@@ -140,9 +150,9 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
           </div>
         ))}
 
-        {order.notes && (
+        {notes && (
           <div className="mt-3 bg-gray-700/60 rounded-xl px-4 py-2.5 text-sm text-gray-300 italic">
-            💬 {order.notes}
+            💬 {notes}
           </div>
         )}
       </div>
@@ -151,17 +161,17 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
       <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between gap-3">
         <div>
           <p className="text-gray-400 text-xs">Total</p>
-          <p className="text-amber-400 font-black text-2xl">{formatRupiah(order.total_price)}</p>
+          <p className="text-amber-400 font-black text-2xl">{formatRupiah(totalPrice)}</p>
         </div>
 
         <div className="flex gap-2">
-          {order.status === 'pending' && (
+          {status === 'pending' && (
             <button
-              onClick={() => onUpdateStatus(order.id, 'processing')}
-              disabled={updatingId === order.id}
+              onClick={() => onUpdateStatus(id, 'processing')}
+              disabled={updatingId === id}
               className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50"
             >
-              {updatingId === order.id
+              {updatingId === id
                 ? <Loader2 size={15} className="animate-spin" />
                 : <Coffee size={15} />
               }
@@ -169,13 +179,13 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
             </button>
           )}
 
-          {(order.status === 'pending' || order.status === 'processing') && (
+          {(status === 'pending' || status === 'processing') && (
             <button
-              onClick={() => onUpdateStatus(order.id, 'completed')}
-              disabled={updatingId === order.id}
+              onClick={() => onUpdateStatus(id, 'completed')}
+              disabled={updatingId === id}
               className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50"
             >
-              {updatingId === order.id
+              {updatingId === id
                 ? <Loader2 size={15} className="animate-spin" />
                 : <CheckCircle2 size={15} />
               }
@@ -190,162 +200,15 @@ const OrderCard = ({ order, onUpdateStatus, updatingId, isNew }) => {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const Cashier = () => {
-  const [orders,      setOrders]      = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
-  const [showFlash,   setShowFlash]   = useState(false);
-  const [newOrderIds, setNewOrderIds] = useState(new Set());   // highlight new cards
-  const [updatingId,  setUpdatingId]  = useState(null);
-  const [filterStatus, setFilterStatus] = useState('active'); // 'active' | 'completed' | 'all'
-  const [tables,       setTables]       = useState([]);
-  const [tableActionId, setTableActionId] = useState(null);
-  const [tableActionError, setTableActionError] = useState('');
+  const [filterStatus, setFilterStatus] = useState('active');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [toast, setToast] = useState(null);
-
-  const socketRef = useRef(null);
-
-  // ── Fetch existing orders ──────────────────────────────────────────────────
-  const fetchOrders = useCallback(async () => {
-    setLoading(true);
-    try {
-      const param = filterStatus === 'active'
-        ? '' : filterStatus === 'completed'
-        ? '?status=completed' : '';
-      const { data } = await api.get(`/orders${param}`);
-      setOrders(data.data || []);
-    } catch (err) {
-      console.error('Gagal fetch orders:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterStatus]);
-
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
-
-  // ── Table management ────────────────────────────────────────────────────────
-  const fetchTables = useCallback(async () => {
-    try {
-      const { data } = await api.get('/tables');
-      setTables(data.data || []);
-    } catch (err) {
-      console.error('Gagal fetch tables:', err);
-    }
-  }, []);
-
-  const handleCompleteTable = async (tableId) => {
-    setTableActionId(tableId);
-    setTableActionError('');
-    try {
-      await api.post(`/tables/${tableId}/complete`);
-      setTables((prev) =>
-        prev.map((t) => (t.id === tableId ? { ...t, status: 'available' } : t))
-      );
-    } catch (err) {
-      console.error('Gagal menyelesaikan sesi meja:', err);
-      setTableActionError(err?.response?.data?.message || 'Gagal menyelesaikan sesi meja.');
-    } finally {
-      setTableActionId(null);
-    }
-  };
-
-  useEffect(() => { fetchTables(); }, [fetchTables]);
-
-  // ── Socket.io connection ──────────────────────────────────────────────────
-  useEffect(() => {
-    const socket = io(SOCKET_BASE_URL, { transports: ['websocket', 'polling'] });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setIsConnected(true);
-      // Notify backend that this client is the cashier screen
-      socket.emit('join_cashier');
-    });
-
-    socket.on('disconnect', () => setIsConnected(false));
-
-    // New order event
-    socket.on('new_order', (payload) => {
-      // Build an order object matching our shape
-      const newOrder = {
-        id:           payload.order_id,
-        table_id:     payload.table_id,
-        table_number: payload.table_number,
-        source:       payload.source || 'customer',
-        status:       payload.status || 'pending',
-        total_price:  payload.total_price,
-        notes:        payload.notes || null,
-        created_at:   payload.created_at,
-        items:        payload.items || [],
-      };
-      if (payload.table_id) {
-        setTables((prev) =>
-          prev.map((table) =>
-            Number(table.id) === Number(payload.table_id)
-              ? { ...table, status: 'occupied' }
-              : table
-          )
-        );
-      }
-
-      // Add to top of list
-      setOrders((prev) => {
-        // Prevent duplicate if we also fetched it
-        const exists = prev.some((o) => o.id === newOrder.id);
-        return exists ? prev : [newOrder, ...prev];
-      });
-
-      // Highlight this card
-      setNewOrderIds((prev) => new Set(prev).add(newOrder.id));
-      setTimeout(() => {
-        setNewOrderIds((prev) => {
-          const next = new Set(prev);
-          next.delete(newOrder.id);
-          return next;
-        });
-      }, 8000); // highlight for 8s
-
-      // Visual & audio effects
-      setShowFlash(true);
-      playBeep();
-    });
-
-    // Order status updated by another cashier / system
-    socket.on('order_updated', ({ order_id, status }) => {
-      setOrders((prev) =>
-        prev.map((o) => o.id === order_id ? { ...o, status } : o)
-      );
-    });
-
-    // Table unlocked by cashier/manager
-    socket.on('table_unlocked', ({ tableId }) => {
-      setTables((prev) =>
-        prev.map((t) => (Number(t.id) === Number(tableId) ? { ...t, status: 'available' } : t))
-      );
-    });
-
-    socket.on('table_session_ended', ({ tableId }) => {
-      setTables((prev) =>
-        prev.map((t) => (Number(t.id) === Number(tableId) ? { ...t, status: 'available' } : t))
-      );
-    });
-
-    return () => socket.disconnect();
-  }, []);
-
-  // ── Update order status ───────────────────────────────────────────────────
-  const handleUpdateStatus = async (orderId, status) => {
-    setUpdatingId(orderId);
-    try {
-      await api.patch(`/orders/${orderId}/status`, { status });
-      // Optimistic update (socket event will also arrive)
-      setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status } : o));
-    } catch (err) {
-      console.error('Gagal update status:', err);
-    } finally {
-      setUpdatingId(null);
-    }
-  };
+  const cashierData = useCashierData(filterStatus, playBeep);
+  const {
+    orders, loading, isConnected, showFlash, setShowFlash, newOrderIds,
+    updatingId, tables, tableActionId, tableActionError, fetchOrders,
+    fetchTables, handleCompleteTable, handleUpdateStatus,
+  } = cashierData;
 
   // ── Filtered view ─────────────────────────────────────────────────────────
   const displayedOrders = orders.filter((o) => {
@@ -544,7 +407,14 @@ const Cashier = () => {
             {displayedOrders.map((order) => (
               <OrderCard
                 key={order.id}
-                order={order}
+                id={order.id}
+                status={order.status}
+                tableNumber={order.table_number}
+                createdAt={order.created_at}
+                source={order.source}
+                items={order.items}
+                notes={order.notes}
+                totalPrice={order.total_price}
                 onUpdateStatus={handleUpdateStatus}
                 updatingId={updatingId}
                 isNew={newOrderIds.has(order.id)}

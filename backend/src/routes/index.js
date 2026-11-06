@@ -5,34 +5,28 @@ const {
   createMenu,
   updateMenu,
   deleteMenu,
-} = require('../controllers/menuController');
-const {
   getAllTables,
   getTableStatus,
   unlockTable,
   completeTableSession,
-} = require('../controllers/tableController');
-const {
   createOrder,
   getOrders,
   updateOrderStatus,
   getOrderHistory,
   getDashboardStats,
-} = require('../controllers/orderController');
-const { login, getMe, changePassword } = require('../controllers/authController');
-const {
+  login,
+  getMe,
+  changePassword,
   getSummary,
   getPopularItems,
   getPeakHours,
   getRevenueTrend,
-} = require('../controllers/statisticsController');
-const {
   getUsers,
   createUser,
   toggleUserStatus,
   deleteUser,
-} = require('../controllers/userController');
-const { getTableData } = require('../controllers/databaseController');
+  getTableData,
+} = require('../container').controllers;
 const { verifyToken, requireRole } = require('../middlewares/authMiddleware');
 
 const router = Router();

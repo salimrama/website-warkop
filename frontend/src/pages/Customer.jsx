@@ -1,14 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { ShoppingCart, Coffee, RefreshCw, MapPin, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import api             from '../utils/api';
 import Toast           from '../components/Toast';
-import { io }          from 'socket.io-client';
-import { SOCKET_BASE_URL } from '../utils/config';
 import TableSelector   from '../components/TableSelector';
 import MenuCard        from '../components/MenuCard';
 import CartSidebar     from '../components/CartSidebar';
+import useCustomerData from '../hooks/useCustomerData';
+import useCustomerCart from '../hooks/useCustomerCart';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -24,241 +23,35 @@ const formatRupiah = (n) =>
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const Customer = () => {
-  // ── Data state ──────────────────────────────────────────────────────────────
-  const [tables,        setTables]        = useState([]);
-  const [menus,         setMenus]         = useState([]);
-  const [loadingTables, setLoadingTables] = useState(true);
-  const [loadingMenus,  setLoadingMenus]  = useState(true);
-
-  // ── UI state ────────────────────────────────────────────────────────────────
-  const [selectedTable,  setSelectedTable]  = useState(null);
+  const [toast, setToast] = useState(null);
   const [activeCategory, setActiveCategory] = useState('all');
-  const [cart,           setCart]           = useState([]);       // [{menu_id, name, price, quantity}]
-  const [isCartOpen,     setIsCartOpen]     = useState(false);
-  const [isCheckingOut,  setIsCheckingOut]  = useState(false);
-  const [showSuccess,    setShowSuccess]    = useState(false);     // modal sukses checkout
-  const [showUnlockNotice, setShowUnlockNotice] = useState(false); // modal notif buka kunci dari kasir
-  const [isRestoringTable, setIsRestoringTable] = useState(true);
-  const [toast,          setToast]          = useState(null);     // {message, type}
-  const endedTableIdsRef = useRef(new Set());
-
-  const resetCustomerTableSession = () => {
-    localStorage.removeItem('selected_table');
-    localStorage.removeItem('is_table_locked');
-    setSelectedTable(null);
-    setCart([]);
-    setIsCartOpen(false);
-    setShowSuccess(false);
-    setShowUnlockNotice(true);
-    fetchTables();
-    setToast({
-      message: 'Sesi meja telah diakhiri. Terima kasih atas kunjungan Anda.',
-      type: 'success',
-    });
-  };
-
-  // ── Fetch data ───────────────────────────────────────────────────────────────
-  const fetchTables = useCallback(async () => {
-    setLoadingTables(true);
-    try {
-      const { data } = await api.get('/tables');
-      setTables(data.data || []);
-    } catch {
-      showToast('Gagal memuat data meja. Coba refresh halaman.', 'error');
-    } finally {
-      setLoadingTables(false);
-    }
+  const showToast = useCallback((message, type = 'success') => {
+    setToast(typeof message === 'object' ? message : { message, type });
   }, []);
-
-  const fetchMenus = useCallback(async () => {
-    setLoadingMenus(true);
-    try {
-      const { data } = await api.get('/menus');
-      setMenus(data.data || []);
-    } catch {
-      showToast('Gagal memuat data menu. Coba refresh halaman.', 'error');
-    } finally {
-      setLoadingMenus(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTables();
-    fetchMenus();
-  }, [fetchTables, fetchMenus]);
-
-  // Restore a saved table only while its server-side session remains active.
-  useEffect(() => {
-    let isMounted = true;
-
-    try {
-      const saved = localStorage.getItem('selected_table');
-      if (!saved) {
-        setIsRestoringTable(false);
-        return () => { isMounted = false; };
-      }
-
-      const savedTable = JSON.parse(saved);
-      if (!savedTable?.id) {
-        localStorage.removeItem('selected_table');
-        localStorage.removeItem('is_table_locked');
-        setIsRestoringTable(false);
-        return () => { isMounted = false; };
-      }
-
-      api.get(`/tables/${savedTable.id}/status`)
-        .then(({ data }) => {
-          if (!isMounted) return;
-          const currentTable = data.data;
-          if (
-            currentTable?.status === 'occupied' &&
-            !endedTableIdsRef.current.has(String(currentTable.id))
-          ) {
-            setSelectedTable(currentTable);
-            return;
-          }
-          resetCustomerTableSession();
-        })
-        .catch((err) => {
-          if (!isMounted) return;
-          if (err?.response?.status === 404) {
-            resetCustomerTableSession();
-            return;
-          }
-          console.error('Gagal memvalidasi sesi meja:', err);
-          setToast({
-            message: 'Status meja tidak dapat diperiksa. Silakan pilih meja kembali.',
-            type: 'error',
-          });
-        })
-        .finally(() => {
-          if (isMounted) setIsRestoringTable(false);
-        });
-    } catch {
-      localStorage.removeItem('selected_table');
-      localStorage.removeItem('is_table_locked');
-      setIsRestoringTable(false);
-    }
-
-    return () => { isMounted = false; };
-  }, []);
-
-  // Reset a matching customer session as soon as the cashier ends it.
-  useEffect(() => {
-    const socket = io(SOCKET_BASE_URL, { transports: ['websocket', 'polling'] });
-
-    const handleTableSessionEnded = ({ tableId }) => {
-      endedTableIdsRef.current.add(String(tableId));
-      try {
-        const savedTable = JSON.parse(localStorage.getItem('selected_table') || 'null');
-        if (Number(savedTable?.id) === Number(tableId)) resetCustomerTableSession();
-      } catch {
-        resetCustomerTableSession();
-      }
-    };
-
-    socket.on('table_session_ended', handleTableSessionEnded);
-    socket.on('order_completed', ({ table_id }) => {
-      try {
-        const savedTable = JSON.parse(localStorage.getItem('selected_table') || 'null');
-        if (Number(savedTable?.id) === Number(table_id)) {
-          showToast('Pesanan telah diantar. Silakan pesan lagi jika diperlukan.', 'success');
-        }
-      } catch (err) {
-        console.error('Gagal membaca sesi meja saat pesanan selesai:', err);
-      }
-    });
-    return () => socket.disconnect();
-  }, []);
-
-  // ── Toast helper ─────────────────────────────────────────────────────────────
-  const showToast = (message, type = 'success') => setToast({ message, type });
   const closeToast = () => setToast(null);
-
-  // ── Cart logic ───────────────────────────────────────────────────────────────
-  const getQuantity = (menuId) => cart.find((i) => i.menu_id === menuId)?.quantity ?? 0;
-
-  const addToCart = (menu) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.menu_id === menu.id);
-      if (existing) {
-        return prev.map((i) =>
-          i.menu_id === menu.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
-      }
-      return [...prev, {
-        menu_id:  menu.id,
-        name:     menu.name,
-        price:    parseFloat(menu.price),
-        quantity: 1,
-        category: menu.category,
-      }];
-    });
-  };
-
-  const removeFromCart = (menuId) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.menu_id === menuId);
-      if (!existing) return prev;
-      if (existing.quantity === 1) return prev.filter((i) => i.menu_id !== menuId);
-      return prev.map((i) => i.menu_id === menuId ? { ...i, quantity: i.quantity - 1 } : i);
-    });
-  };
-
-  const clearCart = () => setCart([]);
-
-  // ── Table selection persistence ─────────────────────────────────────────────
-  const handleSelectTable = (table) => {
-    setSelectedTable(table);
-    try {
-      localStorage.setItem('selected_table', JSON.stringify(table));
-      localStorage.setItem('is_table_locked', 'true');
-    } catch {
-      // ignore storage errors
-    }
-  };
-
-  // ── Checkout ─────────────────────────────────────────────────────────────────
-  const handleCheckout = async () => {
-    if (!selectedTable) {
-      showToast('Pilih nomor meja terlebih dahulu!', 'error');
-      return;
-    }
-    if (cart.length === 0) {
-      showToast('Keranjang masih kosong!', 'error');
-      return;
-    }
-
-    setIsCheckingOut(true);
-    try {
-      await api.post('/orders', {
-        table_id: selectedTable.id,
-        items: cart.map(({ menu_id, quantity }) => ({ menu_id, quantity })),
-      });
-
-      // ── Sukses ──────────────────────────────────────────────────────────────
-      clearCart();
-      setIsCartOpen(false);
-      // Keep selected_table persisted so customer can order again
-      setShowSuccess(true);
-      showToast(`🎉 Pesanan Meja ${selectedTable.table_number} berhasil dikirim! Silakan tunggu.`, 'success');
-      fetchTables(); // Refresh status meja
-    } catch (err) {
-      const msg = err?.response?.data?.message || 'Gagal membuat pesanan. Coba lagi.';
-      showToast(msg, 'error');
-    } finally {
-      setIsCheckingOut(false);
-    }
-  };
+  const resetCartSessionRef = useRef(() => {});
+  const customerData = useCustomerData(showToast, () => resetCartSessionRef.current());
+  const customerCart = useCustomerCart({
+    selectedTable: customerData.selectedTable,
+    refreshTables: customerData.fetchTables,
+    onToast: showToast,
+  });
+  resetCartSessionRef.current = customerCart.resetCartSession;
+  const {
+    tables, menus, loadingTables, loadingMenus, selectedTable,
+    showUnlockNotice, setShowUnlockNotice, isRestoringTable, fetchTables,
+    handleSelectTable,
+  } = customerData;
+  const {
+    cart, isCartOpen, setIsCartOpen, isCheckingOut, showSuccess, setShowSuccess,
+    totalItems, totalPrice, getQuantity, addToCart, removeFromCart, clearCart,
+    handleCheckout,
+  } = customerCart;
 
   // ── Filtered menus ───────────────────────────────────────────────────────────
   const filteredMenus = activeCategory === 'all'
     ? menus
     : menus.filter((m) => m.category === activeCategory);
-
-  // ── Cart summary ─────────────────────────────────────────────────────────────
-  const totalItems = cart.reduce((sum, i) => sum + i.quantity, 0);
-  const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -280,7 +73,7 @@ const Customer = () => {
         onClear={clearCart}
         onCheckout={handleCheckout}
         isCheckingOut={isCheckingOut}
-        selectedTable={selectedTable}
+        selectedTableNumber={selectedTable?.table_number}
       />
 
       {/* ── Header ── */}
@@ -358,7 +151,8 @@ const Customer = () => {
             ) : (
               <TableSelector
                 tables={tables}
-                selectedTable={selectedTable}
+                selectedTableId={selectedTable?.id}
+                selectedTableNumber={selectedTable?.table_number}
                 onSelect={handleSelectTable}
               />
             )}
@@ -430,7 +224,11 @@ const Customer = () => {
               {filteredMenus.map((menu) => (
                 <MenuCard
                   key={menu.id}
-                  menu={menu}
+                  name={menu.name}
+                  category={menu.category}
+                  price={menu.price}
+                  imageUrl={menu.image_url}
+                  description={menu.description}
                   quantity={getQuantity(menu.id)}
                   onAdd={() => addToCart(menu)}
                   onRemove={() => removeFromCart(menu.id)}
@@ -467,7 +265,7 @@ const Customer = () => {
             {loadingTables || isRestoringTable ? (
               <p className="text-sm text-gray-400">Memuat data meja...</p>
             ) : (
-              <TableSelector tables={tables} selectedTable={null} onSelect={handleSelectTable} />
+              <TableSelector tables={tables} onSelect={handleSelectTable} />
             )}
           </div>
         </div>

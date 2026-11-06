@@ -14,13 +14,13 @@ const formatRupiah = (number) =>
  * @param {Function}  onClear        - Empty the entire cart
  * @param {Function}  onCheckout     - Trigger checkout
  * @param {boolean}   isCheckingOut  - Loading state for checkout button
- * @param {Object}    selectedTable  - Currently selected table
+ * @param {string|number} selectedTableNumber - Currently selected table number
  */
 const CartSidebar = ({
   isOpen, onClose,
   cart, onAdd, onRemove, onClear,
   onCheckout, isCheckingOut,
-  selectedTable,
+  selectedTableNumber,
 }) => {
   const totalItems = cart.reduce((sum, i) => sum + i.quantity, 0);
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -78,11 +78,11 @@ const CartSidebar = ({
         </div>
 
         {/* Selected table info */}
-        {selectedTable && (
+        {selectedTableNumber && (
           <div className="mx-4 mt-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center gap-2">
             <Receipt size={15} className="text-amber-500 shrink-0" />
             <span className="text-sm text-amber-700">
-              Meja <strong>{selectedTable.table_number}</strong>
+              Meja <strong>{selectedTableNumber}</strong>
             </span>
           </div>
         )}
@@ -141,10 +141,10 @@ const CartSidebar = ({
 
             <button
               onClick={onCheckout}
-              disabled={isCheckingOut || !selectedTable}
+              disabled={isCheckingOut || !selectedTableNumber}
               className={`
                 w-full py-3.5 rounded-2xl font-bold text-base transition-all duration-150 flex items-center justify-center gap-2
-                ${isCheckingOut || !selectedTable
+                ${isCheckingOut || !selectedTableNumber
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-amber-500 text-white hover:bg-amber-600 active:scale-95 shadow-lg shadow-amber-200'
                 }
@@ -166,7 +166,7 @@ const CartSidebar = ({
               )}
             </button>
 
-            {!selectedTable && (
+            {!selectedTableNumber && (
               <p className="text-center text-xs text-red-400">⚠️ Pilih nomor meja terlebih dahulu</p>
             )}
           </div>
@@ -177,4 +177,3 @@ const CartSidebar = ({
 };
 
 export default CartSidebar;
-

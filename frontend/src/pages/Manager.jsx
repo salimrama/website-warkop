@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import {
   Users, History, TrendingUp, DollarSign, ShoppingBag,
   UserPlus, LogOut, Coffee, RefreshCw, CheckCircle2,
   XCircle, Clock, ShieldCheck, ChevronRight, X, UtensilsCrossed, Plus, Trash2, KeyRound,
   BarChart3, CalendarDays, List, Copy, Database
 } from 'lucide-react';
-import api from '../utils/api';
 import Toast from '../components/Toast';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import DatabaseViewer from '../components/DatabaseViewer';
+import useManagerData from '../hooks/useManagerData';
 
 const formatRupiah = (n) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n);
@@ -23,11 +23,6 @@ const formatDate = (dateStr) => {
 
 const Manager = () => {
   const [activeTab,    setActiveTab]    = useState('history'); // 'history' | 'statistics' | 'employees' | 'menus' | 'database'
-  const [stats,        setStats]        = useState(null);
-  const [history,      setHistory]      = useState([]);
-  const [employees,    setEmployees]    = useState([]);
-  const [menus,        setMenus]        = useState([]);
-  const [loading,      setLoading]      = useState(true);
   const [filterStatus, setFilterStatus] = useState('all');
   const [menuCatFilter,setMenuCatFilter]= useState('all');
   const [statisticsFilters, setStatisticsFilters] = useState({
@@ -37,14 +32,17 @@ const Manager = () => {
   });
   const [statisticsDateMode, setStatisticsDateMode] = useState('range');
   const [statisticsViewMode, setStatisticsViewMode] = useState('chart');
-  const [statistics, setStatistics] = useState({
-    summary: { total_revenue: 0, total_transactions: 0 },
-    popularItems: { food: [], drink: [], snack: [] },
-    peakHours: [],
-    revenueTrend: [],
+  const managerData = useManagerData({
+    filterStatus,
+    activeTab,
+    statisticsDateMode,
+    statisticsFilters,
   });
-  const [statisticsLoading, setStatisticsLoading] = useState(false);
-  const [statisticsError, setStatisticsError] = useState('');
+  const {
+    stats, history, employees, menus, loading, statistics, statisticsLoading,
+    statisticsError, setStatisticsError, reloadAll, createEmployee, deleteEmployee,
+    createMenu, deleteMenu,
+  } = managerData;
 
   // Modal Tambah Karyawan
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -74,120 +72,6 @@ const Manager = () => {
     localStorage.removeItem('warkop_user');
     window.location.href = '/login';
   };
-
-  // ── Fetch Data ─────────────────────────────────────────────────────────────
-  const fetchStats = async () => {
-    try {
-      const { data } = await api.get('/dashboard/stats');
-      setStats(data.data);
-    } catch (err) {
-      console.error('Gagal fetch stats:', err);
-    }
-  };
-
-  const fetchHistory = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/orders/history?status=${filterStatus}`);
-      setHistory(data.data || []);
-    } catch (err) {
-      console.error('Gagal fetch history:', err);
-    }
-  }, [filterStatus]);
-
-  const fetchEmployees = async () => {
-    try {
-      const { data } = await api.get('/users');
-      setEmployees(data.data || []);
-    } catch (err) {
-      console.error('Gagal fetch users:', err);
-    }
-  };
-
-  const fetchMenus = useCallback(async () => {
-    try {
-      const { data } = await api.get('/menus?all=1');
-      setMenus(data.data || []);
-    } catch (err) {
-      console.error('Gagal fetch menus:', err);
-    }
-  }, []);
-
-  const reloadAll = useCallback(async () => {
-    setLoading(true);
-    await Promise.all([fetchStats(), fetchHistory(), fetchEmployees(), fetchMenus()]);
-    setLoading(false);
-  }, [fetchHistory, fetchMenus]);
-
-  useEffect(() => {
-    reloadAll();
-  }, [reloadAll]);
-
-  useEffect(() => {
-    if (activeTab !== 'statistics') return undefined;
-
-    if (
-      statisticsDateMode === 'range' &&
-      statisticsFilters.startDate &&
-      statisticsFilters.endDate &&
-      statisticsFilters.startDate > statisticsFilters.endDate
-    ) {
-      setStatisticsError('Tanggal awal tidak boleh melewati tanggal akhir.');
-      setStatisticsLoading(false);
-      setStatistics({
-        summary: { total_revenue: 0, total_transactions: 0 },
-        popularItems: { food: [], drink: [], snack: [] },
-        peakHours: [],
-        revenueTrend: [],
-      });
-      return undefined;
-    }
-
-    let isMounted = true;
-    const fetchStatistics = async () => {
-      setStatisticsLoading(true);
-      setStatisticsError('');
-      const params = new URLSearchParams();
-      const activeFilters = statisticsDateMode === 'range'
-        ? { startDate: statisticsFilters.startDate, endDate: statisticsFilters.endDate }
-        : { date: statisticsFilters.date };
-      Object.entries(activeFilters).forEach(([key, value]) => {
-        if (value) params.set(key, value);
-      });
-      const query = params.toString();
-      const suffix = query ? `?${query}` : '';
-
-      try {
-        const [summaryResponse, popularItemsResponse, peakHoursResponse, revenueTrendResponse] = await Promise.all([
-          api.get(`/statistics/summary${suffix}`),
-          api.get(`/statistics/popular-items${suffix}`),
-          api.get(`/statistics/peak-hours${suffix}`),
-          api.get(`/statistics/revenue-trend${suffix}`),
-        ]);
-        if (!isMounted) return;
-        setStatistics({
-          summary: summaryResponse.data.data,
-          popularItems: popularItemsResponse.data.data,
-          peakHours: peakHoursResponse.data.data,
-          revenueTrend: revenueTrendResponse.data.data,
-        });
-      } catch (err) {
-        if (!isMounted) return;
-        console.error('Gagal memuat statistik:', err);
-        setStatisticsError(err?.response?.data?.message || 'Gagal memuat statistik. Coba lagi.');
-        setStatistics({
-          summary: { total_revenue: 0, total_transactions: 0 },
-          popularItems: { food: [], drink: [], snack: [] },
-          peakHours: [],
-          revenueTrend: [],
-        });
-      } finally {
-        if (isMounted) setStatisticsLoading(false);
-      }
-    };
-
-    fetchStatistics();
-    return () => { isMounted = false; };
-  }, [activeTab, statisticsDateMode, statisticsFilters]);
 
   const handleCopyStatistics = async () => {
     const categoryNames = { food: 'Makanan', drink: 'Minuman', snack: 'Cemilan' };
@@ -247,11 +131,9 @@ const Manager = () => {
 
     setFormLoading(true);
     try {
-      await api.post('/users', formData);
+      await createEmployee(formData);
       setIsAddUserOpen(false);
       setFormData({ name: '', email: '', password: '', role: 'cashier' });
-      fetchEmployees();
-      fetchStats();
     } catch (err) {
       setFormError(err?.response?.data?.message || 'Gagal menambahkan karyawan.');
     } finally {
@@ -265,10 +147,8 @@ const Manager = () => {
     setDeleteLoading(true);
     setDeleteError('');
     try {
-      await api.delete(`/users/${employeeToDelete.id}`);
-      setEmployees((prev) => prev.filter((employee) => employee.id !== employeeToDelete.id));
+      await deleteEmployee(employeeToDelete.id);
       setEmployeeToDelete(null);
-      fetchStats();
     } catch (err) {
       setDeleteError(err?.response?.data?.message || 'Gagal menghapus karyawan.');
     } finally {
@@ -287,10 +167,9 @@ const Manager = () => {
 
     setMenuLoading(true);
     try {
-      await api.post('/menus', menuForm);
+      await createMenu(menuForm);
       setIsAddMenuOpen(false);
       setMenuForm({ name: '', description: '', price: '', category: 'drink', image_url: '' });
-      fetchMenus();
     } catch (err) {
       setMenuError(err?.response?.data?.message || 'Gagal menambahkan menu.');
     } finally {
@@ -302,8 +181,7 @@ const Manager = () => {
   const handleDeleteMenu = async (id, name) => {
     if (!window.confirm(`Hapus menu "${name}"?`)) return;
     try {
-      await api.delete(`/menus/${id}`);
-      fetchMenus();
+      await deleteMenu(id);
     } catch (err) {
       alert(err?.response?.data?.message || 'Gagal menghapus menu.');
     }

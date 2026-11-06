@@ -12,14 +12,28 @@ const formatRupiah = (number) =>
 
 /**
  * Single menu item card with add/remove buttons.
- * @param {Object}   menu       - Menu object from API
+ * @param {string}   name       - Menu name
+ * @param {string}   category   - Menu category
+ * @param {number}   price      - Menu price
+ * @param {string}   imageUrl   - Optional menu image URL
+ * @param {string}   description - Optional menu description
  * @param {number}   quantity   - Current quantity in cart (0 if not added)
  * @param {Function} onAdd      - Increment quantity
  * @param {Function} onRemove   - Decrement quantity
  * @param {boolean}  disabled   - Disable controls when no table selected
  */
-const MenuCard = ({ menu, quantity = 0, onAdd, onRemove, disabled }) => {
-  const visual = CATEGORY_VISUALS[menu.category] || CATEGORY_VISUALS.drink;
+const MenuCard = ({
+  name,
+  category,
+  price,
+  imageUrl,
+  description,
+  quantity = 0,
+  onAdd,
+  onRemove,
+  disabled,
+}) => {
+  const visual = CATEGORY_VISUALS[category] || CATEGORY_VISUALS.drink;
 
   return (
     <div className={`
@@ -29,8 +43,8 @@ const MenuCard = ({ menu, quantity = 0, onAdd, onRemove, disabled }) => {
     `}>
       {/* Gambar / Placeholder */}
       <div className={`bg-gradient-to-br ${visual.gradient} flex items-center justify-center h-32 text-5xl select-none`}>
-        {menu.image_url
-          ? <img src={menu.image_url} alt={menu.name} className="h-full w-full object-cover" />
+        {imageUrl
+          ? <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
           : visual.emoji
         }
       </div>
@@ -38,17 +52,17 @@ const MenuCard = ({ menu, quantity = 0, onAdd, onRemove, disabled }) => {
       {/* Info */}
       <div className="p-3 flex flex-col gap-1 flex-1">
         <span className={`text-[10px] uppercase font-semibold tracking-widest
-          ${menu.category === 'drink' ? 'text-amber-500'
-            : menu.category === 'food' ? 'text-yellow-600'
+          ${category === 'drink' ? 'text-amber-500'
+            : category === 'food' ? 'text-yellow-600'
             : 'text-orange-500'}`}>
-          {menu.category}
+          {category}
         </span>
-        <h3 className="text-sm font-bold text-gray-800 leading-tight line-clamp-2">{menu.name}</h3>
-        {menu.description && (
-          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">{menu.description}</p>
+        <h3 className="text-sm font-bold text-gray-800 leading-tight line-clamp-2">{name}</h3>
+        {description && (
+          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">{description}</p>
         )}
         <p className="text-amber-600 font-bold text-sm mt-auto pt-2">
-          {formatRupiah(menu.price)}
+          {formatRupiah(price)}
         </p>
       </div>
 
@@ -92,4 +106,3 @@ const MenuCard = ({ menu, quantity = 0, onAdd, onRemove, disabled }) => {
 };
 
 export default MenuCard;
-
